@@ -1,0 +1,389 @@
+# GCP Ingress Configuration for Retail Microservices
+# This uses Google Cloud Load Balancer with SSL/TLS support
+# Deploy with: kubectl apply -f gcp-retail-ingress.yaml
+
+---
+# BackendConfig - GCP-specific configurations
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: retail-backendconfig
+  namespace: retail
+spec:
+  # Session affinity for stateful connections
+  sessionAffinity:
+    affinityType: "CLIENT_IP"
+    affinityCookieTtlSec: 3600
+  
+  # Health checks configuration
+  healthChecks:
+  - name: retail-health-check
+  
+  # Cloud Armor security policy
+  securityPolicy:
+    name: "retail-security-policy"
+  
+  # CDN configuration for static assets
+  cdn:
+    enabled: true
+    cachePolicy:
+      includeHost: true
+      includeProtocol: true
+      includeQueryString: false
+    negativeCaching: true
+    negativeCachingPolicy:
+    - code: 404
+      ttlSec: 300
+    - code: 401
+      ttlSec: 60
+  
+  # IAP (Identity-Aware Proxy) - Optional
+  # iap:
+  #   enabled: true
+  #   oauth2ClientSecretName: oauth2-client-secret
+
+---
+# BackendConfig for Account Service
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: account-backendconfig
+  namespace: retail
+spec:
+  sessionAffinity:
+    affinityType: "CLIENT_IP"
+  timeoutSec: 30
+  customRequestHeaders:
+    headers: ["X-Client-Region"]
+
+---
+# Update Account Service to use BackendConfig
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service
+  namespace: retail
+  annotations:
+    cloud.google.com/backend-config: '{"ports": {"80":"account-backendconfig"}}'
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  selector:
+    app: account-service
+
+---
+# BackendConfig for Payment Service
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: payment-backendconfig
+  namespace: retail
+spec:
+  sessionAffinity:
+    affinityType: "CLIENT_IP"
+  timeoutSec: 60  # Payment operations may take longer
+  customRequestHeaders:
+    headers: ["X-Service-Version"]
+
+---
+# Update Payment Service to use BackendConfig
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: retail
+  annotations:
+    cloud.google.com/backend-config: '{"ports": {"80":"payment-backendconfig"}}'
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5001
+    protocol: TCP
+    name: http
+  selector:
+    app: payment-service
+
+---
+# BackendConfig for Checkout Service
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: checkout-backendconfig
+  namespace: retail
+spec:
+  sessionAffinity:
+    affinityType: "CLIENT_IP"
+  timeoutSec: 45
+
+---
+# Update Checkout Service to use BackendConfig
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-service
+  namespace: retail
+  annotations:
+    cloud.google.com/backend-config: '{"ports": {"80":"checkout-backendconfig"}}'
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5003
+    protocol: TCP
+    name: http
+  selector:
+    app: checkout-service
+
+---
+# Loyalty Service (no special config needed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: loyalty-service
+  namespace: retail
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5002
+    protocol: TCP
+    name: http
+  selector:
+    app: loyalty-service
+
+---
+# GCP Ingress with Cloud Load Balancer
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retail-ingress
+  namespace: retail
+  annotations:
+    # Use GCP Cloud Load Balancer
+    kubernetes.io/ingress.class: "gce"
+    # Managed Certificate (auto-provisioned SSL)
+    networking.gke.io/managed-certificates: "retail-cert"
+    # Ingress backend config
+    kubernetes.io/ingress.global-static-ip-name: "retail-ip"
+spec:
+  rules:
+  # Account Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/account/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: account-service
+            port:
+              number: 80
+      - path: "/auth/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: account-service
+            port:
+              number: 80
+  
+  # Payment Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/payments/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: payment-service
+            port:
+              number: 80
+  
+  # Checkout Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/checkout/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: checkout-service
+            port:
+              number: 80
+      - path: "/cart/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: checkout-service
+            port:
+              number: 80
+      - path: "/orders/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: checkout-service
+            port:
+              number: 80
+  
+  # Loyalty Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/loyalty/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: loyalty-service
+            port:
+              number: 80
+
+---
+# Managed Certificate for SSL/TLS (GCP-specific)
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: retail-cert
+  namespace: retail
+spec:
+  domains:
+  - api.retail.example.com
+  - retail.example.com
+  - www.retail.example.com
+
+---
+# FrontendConfig for HTTPS redirect (GCP-specific)
+apiVersion: cloud.google.com/v1
+kind: FrontendConfig
+metadata:
+  name: retail-frontendconfig
+  namespace: retail
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: "301"
+
+---
+# NetworkPolicy - Restrict traffic between services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: retail-network-policy
+  namespace: retail
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow Ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  # Allow inter-service communication
+  - from:
+    - podSelector: {}
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow inter-service communication
+  - to:
+    - podSelector: {}
+  # Allow external HTTPS
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+# PodDisruptionBudget - Ensure service availability during maintenance
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: account-service-pdb
+  namespace: retail
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: account-service
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-service-pdb
+  namespace: retail
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: payment-service
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: checkout-service-pdb
+  namespace: retail
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: checkout-service
+
+---
+# ServiceAccount for pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: retail-sa
+  namespace: retail
+
+---
+# ClusterRole for retail services
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: retail-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: retail-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: retail-role
+subjects:
+- kind: ServiceAccount
+  name: retail-sa
+  namespace: retail

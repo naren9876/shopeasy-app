@@ -1,0 +1,621 @@
+# GCP Kubernetes Manifests for Retail Microservices
+# Deploy to GCP with: gcloud container clusters get-credentials CLUSTER_NAME
+#                     kubectl apply -f gcp-retail-app.yaml
+
+---
+# NAMESPACE
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: retail
+  labels:
+    environment: production
+    app: retail-system
+
+---
+# CONFIGMAPS - Account Service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: account-config
+  namespace: retail
+data:
+  SERVICE_NAME: "account-service"
+  SERVICE_VERSION: "1.0.0"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  DATABASE_HOST: "cloudsql-proxy"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "retail_db"
+
+---
+# CONFIGMAPS - Payment Service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-config
+  namespace: retail
+data:
+  SERVICE_NAME: "payment-service"
+  SERVICE_VERSION: "1.0.0"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  PAYMENT_GATEWAY: "stripe"
+  DATABASE_HOST: "cloudsql-proxy"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "retail_db"
+
+---
+# CONFIGMAPS - Loyalty Service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loyalty-config
+  namespace: retail
+data:
+  SERVICE_NAME: "loyalty-service"
+  SERVICE_VERSION: "1.0.0"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  POINTS_MULTIPLIER: "1.0"
+  DATABASE_HOST: "cloudsql-proxy"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "retail_db"
+
+---
+# CONFIGMAPS - Checkout Service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkout-config
+  namespace: retail
+data:
+  SERVICE_NAME: "checkout-service"
+  SERVICE_VERSION: "1.0.0"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  TAX_RATE: "0.08"
+  DATABASE_HOST: "cloudsql-proxy"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "retail_db"
+
+---
+# SECRETS - Database Credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: retail
+type: Opaque
+data:
+  # base64 encoded: echo -n "postgres" | base64
+  DB_USER: cG9zdGdyZXM=
+  # base64 encoded: echo -n "your-secure-password" | base64
+  DB_PASSWORD: eW91ci1zZWN1cmUtcGFzc3dvcmQ=
+
+---
+# SECRETS - Payment Gateway API Keys
+apiVersion: v1
+kind: Secret
+metadata:
+  name: payment-secrets
+  namespace: retail
+type: Opaque
+data:
+  # base64 encoded Stripe API key
+  STRIPE_API_KEY: c2tfdGVzdF81MGFhYmMwMGU2Mjc5OGIwMDAwMA==
+  # base64 encoded webhook secret
+  STRIPE_WEBHOOK_SECRET: d2hfc2tfdGVzdF81MGFhYmMwMGU2Mjc5OGIwMDAwMA==
+
+---
+# SECRETS - JWT Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jwt-secret
+  namespace: retail
+type: Opaque
+data:
+  # base64 encoded JWT secret
+  JWT_SECRET: bXlzZWNyZXRqd3RrZXk=
+
+---
+# ACCOUNT SERVICE - Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-service
+  namespace: retail
+  labels:
+    app: account-service
+    version: v1
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: account-service
+  template:
+    metadata:
+      labels:
+        app: account-service
+        version: v1
+    spec:
+      # GCP Service Account (requires setup)
+      serviceAccountName: retail-sa
+      
+      containers:
+      - name: app
+        image: us-central1-docker.pkg.dev/project-bce33668-9485-49b7-820/retail-images/account-service:v1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5000
+          name: http
+        
+        # ConfigMap as environment variables
+        envFrom:
+        - configMapRef:
+            name: account-config
+        
+        # Secret as environment variables
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_PASSWORD
+        
+        # Resource requests and limits
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        
+        # Security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+---
+# ACCOUNT SERVICE - Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service
+  namespace: retail
+  labels:
+    app: account-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  selector:
+    app: account-service
+
+---
+# PAYMENT SERVICE - Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: retail
+  labels:
+    app: payment-service
+    version: v1
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        version: v1
+    spec:
+      serviceAccountName: retail-sa
+      
+      containers:
+      - name: app
+        image: us-central1-docker.pkg.dev/project-bce33668-9485-49b7-820/retail-images/payment-service:v1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5001
+          name: http
+        
+        envFrom:
+        - configMapRef:
+            name: payment-config
+        
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_PASSWORD
+        - name: STRIPE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: payment-secrets
+              key: STRIPE_API_KEY
+        - name: STRIPE_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: payment-secrets
+              key: STRIPE_WEBHOOK_SECRET
+        
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+---
+# PAYMENT SERVICE - Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: retail
+  labels:
+    app: payment-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5001
+    protocol: TCP
+    name: http
+  selector:
+    app: payment-service
+
+---
+# LOYALTY SERVICE - Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loyalty-service
+  namespace: retail
+  labels:
+    app: loyalty-service
+    version: v1
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: loyalty-service
+  template:
+    metadata:
+      labels:
+        app: loyalty-service
+        version: v1
+    spec:
+      serviceAccountName: retail-sa
+      
+      containers:
+      - name: app
+        image: us-central1-docker.pkg.dev/project-bce33668-9485-49b7-820/retail-images/loyalty-service:v1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5002
+          name: http
+        
+        envFrom:
+        - configMapRef:
+            name: loyalty-config
+        
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_PASSWORD
+        
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5002
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+---
+# LOYALTY SERVICE - Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: loyalty-service
+  namespace: retail
+  labels:
+    app: loyalty-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5002
+    protocol: TCP
+    name: http
+  selector:
+    app: loyalty-service
+
+---
+# CHECKOUT SERVICE - Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-service
+  namespace: retail
+  labels:
+    app: checkout-service
+    version: v1
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: checkout-service
+  template:
+    metadata:
+      labels:
+        app: checkout-service
+        version: v1
+    spec:
+      serviceAccountName: retail-sa
+      
+      containers:
+      - name: app
+        image: us-central1-docker.pkg.dev/project-bce33668-9485-49b7-820/retail-images/checkout-service:v1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5003
+          name: http
+        
+        envFrom:
+        - configMapRef:
+            name: checkout-config
+        
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: DB_PASSWORD
+        
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5003
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 5003
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+---
+# CHECKOUT SERVICE - Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-service
+  namespace: retail
+  labels:
+    app: checkout-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5003
+    protocol: TCP
+    name: http
+  selector:
+    app: checkout-service
+
+---
+# HORIZONTAL POD AUTOSCALER - Account Service
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: account-service-hpa
+  namespace: retail
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: account-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# HORIZONTAL POD AUTOSCALER - Payment Service
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payment-service-hpa
+  namespace: retail
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-service
+  minReplicas: 2
+  maxReplicas: 15
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+---
+# HORIZONTAL POD AUTOSCALER - Checkout Service
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: checkout-service-hpa
+  namespace: retail
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: checkout-service
+  minReplicas: 2
+  maxReplicas: 12
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75

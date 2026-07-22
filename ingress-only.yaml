@@ -1,0 +1,86 @@
+---
+# GCP Ingress with Cloud Load Balancer
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retail-ingress-v2
+  namespace: retail
+  annotations:
+    # Use GCP Cloud Load Balancer
+    kubernetes.io/ingress.class: "gce"
+    # Managed Certificate (auto-provisioned SSL)
+    networking.gke.io/managed-certificates: "retail-cert"
+    # Ingress backend config
+    kubernetes.io/ingress.global-static-ip-name: "retail-ip"
+spec:
+  rules:
+  # Account Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/account/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: account-service
+            port:
+              number: 80
+      - path: "/auth/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: account-service
+            port:
+              number: 80
+  
+  # Payment Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/payments/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: payment-service
+            port:
+              number: 80
+  
+  # Checkout Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/checkout/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: checkout-service
+            port:
+              number: 80
+      - path: "/cart/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: checkout-service
+            port:
+              number: 80
+      - path: "/orders/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: checkout-service
+            port:
+              number: 80
+  
+  # Loyalty Service
+  - host: "api.retail.example.com"
+    http:
+      paths:
+      - path: "/loyalty/*"
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: loyalty-service
+            port:
+              number: 80
+
+
