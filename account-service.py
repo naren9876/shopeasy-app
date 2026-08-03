@@ -38,6 +38,7 @@ def health_check():
         'status': 'healthy',
         'service': SERVICE_NAME,
         'version': SERVICE_VERSION,
+        'deployed_by': 'pipeline',
         'timestamp': datetime.now().isoformat()
     }), 200
 

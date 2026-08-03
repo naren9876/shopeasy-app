@@ -177,11 +177,11 @@ spec:
         # Resource requests and limits
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "100m"
+            memory: "128Mi"
+            cpu: "50m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "256Mi"
+            cpu: "250m"
         
         # Liveness probe
         livenessProbe:
@@ -296,11 +296,11 @@ spec:
         
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "100m"
+            memory: "128Mi"
+            cpu: "50m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "256Mi"
+            cpu: "250m"
         
         livenessProbe:
           httpGet:
@@ -398,11 +398,11 @@ spec:
         
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "100m"
+            memory: "128Mi"
+            cpu: "50m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "256Mi"
+            cpu: "250m"
         
         livenessProbe:
           httpGet:
@@ -500,11 +500,11 @@ spec:
         
         resources:
           requests:
-            memory: "256Mi"
-            cpu: "100m"
+            memory: "128Mi"
+            cpu: "50m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "256Mi"
+            cpu: "250m"
         
         livenessProbe:
           httpGet:

@@ -1,0 +1,41 @@
+substitutions:
+  _REGION: us-central1
+  _REPO: retail-images
+  _ZONE: us-east1-c
+  _CLUSTER: retail-cluster
+  _TAG: manual
+
+steps:
+  # ---- Step 1: build + push all four images, tagged with the commit SHA ----
+  - id: build-and-push
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        for SVC in account payment loyalty checkout; do
+          docker build -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/$${SVC}-service:${_TAG} -f Dockerfile.$${SVC} .
+          docker push ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/$${SVC}-service:${_TAG}
+        done
+
+  # ---- Step 2: roll the deployments to the new images ----
+  - id: deploy
+    name: 'gcr.io/cloud-builders/kubectl'
+    env:
+      - 'CLOUDSDK_COMPUTE_ZONE=${_ZONE}'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=${_CLUSTER}'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+          gcloud container clusters get-credentials ${_CLUSTER} --zone ${_ZONE} --project $PROJECT_ID
+          for SVC in account payment loyalty checkout; do
+          kubectl set image deployment/$${SVC}-service \
+            app=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/$${SVC}-service:${_TAG} \
+            -n retail
+        done
+
+options:
+  logging: CLOUD_LOGGING_ONLY
