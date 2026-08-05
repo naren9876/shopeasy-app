@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: account-pdb, namespace: retail }
+spec:
+  maxUnavailable: 1
+  selector: { matchLabels: { app: account-service } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: checkout-pdb, namespace: retail }
+spec:
+  maxUnavailable: 1
+  selector: { matchLabels: { app: checkout-service } }
